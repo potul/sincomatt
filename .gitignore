@@ -1,0 +1,50 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.obj
+*.pdb
+*.iobj
+*.ipdb
+*.tlog
+*.res
+*.recipe
+*.exe
+
+# Large reverse-engineering / binary dumps & reference data
+SincoAnn/
+Fender/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Packaging & distribution
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Output directories & trained binary profiles
+output/
+*_profiles.zip
+audiotrain_colab.zip
+test_am4/out*/
+*.am4Data
+*.am3Data
+*.irData
+*.am4lossrec
+*.am3lossrec
+*.irlossrec
+batch_summary.json
+
+# IDE & AI Assistant metadata
+.gemini/
+.vscode/
+.idea/
+
+# OS artifacts
+Thumbs.db
+.DS_Store

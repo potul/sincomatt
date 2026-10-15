@@ -1,0 +1,29 @@
+# Configuration preset for AM3 model
+# AM3 uses CNN feature extractor, arsinh non-linearity, 256-tap FIR filters, GRU(1, 16), and Linear(16, 1)
+samples_path: ""
+output_dir: ""
+
+data:
+  sample_rate: 44100
+  frame_size: 512
+  delay: 0
+  train_ratio: 0.6
+  normalize_peak: true
+
+model:
+  model_type: "AM3"
+  model_name: "am3_preset"
+  fir1_size: 256
+  fir2_size: 256
+  rnn_hidden_size: 16
+  rnn_num_layers: 1
+  cnn_kernel_size: 32
+  cnn_channels: 3
+
+training:
+  batch_size: 1024
+  epochs: 1000
+  learning_rate: 0.0008
+  weight_decay: 0.0001
+  fine_tuning_ratio: 0.70
+  device: "cuda"

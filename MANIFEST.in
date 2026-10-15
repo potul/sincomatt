@@ -1,0 +1,7 @@
+include README.md
+include requirements.txt
+include pyproject.toml
+recursive-include audiotrain/assets *.wav
+recursive-include audiotrain/configs *.yaml
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]

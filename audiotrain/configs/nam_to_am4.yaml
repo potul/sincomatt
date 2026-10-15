@@ -1,0 +1,27 @@
+# Configuration preset for Distilling NAM to AM4
+samples_path: ""
+output_dir: ""
+nam_path: ""
+
+data:
+  sample_rate: 44100
+  frame_size: 512
+  delay: 0
+  train_ratio: 0.6
+  normalize_peak: true
+
+model:
+  model_type: "NAM_TO_AM4"
+  model_name: "nam_distilled_model"
+  fir1_size: 512
+  fir2_size: 512
+  rnn_hidden_size: 16
+  rnn_num_layers: 1
+
+training:
+  batch_size: 1024
+  epochs: 1000
+  learning_rate: 0.0008
+  weight_decay: 0.0001
+  fine_tuning_ratio: 0.70
+  device: "cuda"

@@ -1,0 +1,27 @@
+# Configuration preset for AM4 model
+# AM4 uses 512-tap input FIR, GRU(1, 16), Linear(16, 1), and 512-tap output FIR
+samples_path: ""
+output_dir: ""
+
+data:
+  sample_rate: 44100
+  frame_size: 512
+  delay: 0
+  train_ratio: 0.6
+  normalize_peak: true
+
+model:
+  model_type: "AM4"
+  model_name: "am4_preset"
+  fir1_size: 512
+  fir2_size: 512
+  rnn_hidden_size: 16
+  rnn_num_layers: 1
+
+training:
+  batch_size: 1024
+  epochs: 1000
+  learning_rate: 0.0008
+  weight_decay: 0.0001
+  fine_tuning_ratio: 0.70
+  device: "cuda"

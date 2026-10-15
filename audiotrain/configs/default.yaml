@@ -1,0 +1,38 @@
+# Default training configuration for AudioTrain
+samples_path: ""
+output_dir: ""
+nam_path: null
+
+data:
+  sample_rate: 44100
+  frame_size: 512
+  delay: 0
+  train_ratio: 0.6
+  normalize_peak: true
+
+model:
+  model_type: "AM4"
+  model_name: "sinco_model"
+  fir1_size: 512
+  fir2_size: 512
+  rnn_hidden_size: 16
+  rnn_num_layers: 1
+  eq_bass_freq: 100.0
+  eq_bass_gain_min: -6.0
+  eq_bass_gain_max: 6.0
+  eq_mid_freq: 2000.0
+  eq_mid_gain_min: -6.0
+  eq_mid_gain_max: 6.0
+  eq_treble_freq: 4000.0
+  eq_treble_gain_min: -6.0
+  eq_treble_gain_max: 6.0
+
+training:
+  batch_size: 1024
+  epochs: 1000
+  learning_rate: 0.0008
+  weight_decay: 0.0001
+  fine_tuning_ratio: 0.70
+  patience: 100
+  device: "cuda"
+  seed: 42

@@ -1,0 +1,23 @@
+# Configuration preset for IR1024 impulse response model
+samples_path: ""
+output_dir: ""
+
+data:
+  sample_rate: 44100
+  frame_size: 512
+  delay: 0
+  train_ratio: 0.6
+  normalize_peak: true
+
+model:
+  model_type: "IR1024"
+  model_name: "ir1024_preset"
+  fir1_size: 1024
+  fir2_size: 0
+
+training:
+  batch_size: 1024
+  epochs: 500
+  learning_rate: 0.001
+  fine_tuning_ratio: 0.50
+  device: "cuda"
