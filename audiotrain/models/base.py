@@ -16,6 +16,17 @@ class BaseAmpModel(nn.Module, abc.ABC):
         """Returns magic tag, e.g. 'AM3', 'AM4', 'IR'."""
         pass
 
+    @property
+    def receptive_field_pad(self) -> int:
+        """
+        Total causal lookback samples required by valid Conv1d layers (matching *(model + 0x218) in AudioTrainHHAG.exe):
+          - AM4: 1022 (511 + 511)
+          - AM3: 573 (63 + 255 + 255)
+          - IR1024: 1023
+          - IR2048: 2047
+        """
+        return 0
+
     @abc.abstractmethod
     def export_weights_array(self) -> torch.Tensor:
         """Returns contiguous 1D float32 tensor of all weights in binary serialization order."""

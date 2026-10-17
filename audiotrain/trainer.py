@@ -228,12 +228,14 @@ class AudioTrainer:
             loaded_audio=self.audio_data,
             frame_size=self.config.data.frame_size,
             delay=self.config.data.delay,
+            receptive_field_pad=self.model.receptive_field_pad,
             train_ratio=self.config.data.train_ratio,
         )
 
         logger.info(
             f"Dataset split: {len(train_ds):,} train frames (60%), "
-            f"{len(val_ds):,} val frames (40%) [Total: {len(train_ds) + len(val_ds):,}]"
+            f"{len(val_ds):,} val frames (40%) [Total: {len(train_ds) + len(val_ds):,}, "
+            f"lookback={self.model.receptive_field_pad} samples]"
         )
 
         self.train_loader, self.val_loader = get_dataloaders(
@@ -277,10 +279,12 @@ class AudioTrainer:
     def validate(self) -> Tuple[float, float, float]:
         """
         Computes validation metrics matching AudioTrainHHAG.exe (FUN_140044EE0 - FUN_140045082):
-        Evaluates each batch through the active loss function (BasicTuning ESR or FineTuning Spectral)
+        Evaluates each batch through the active loss function:
+          - BasicTuning: FUN_14003f820 (1st-order 2-tap pre-emphasis + time ESR)
+          - FineTuning:  FUN_14003f9f0 (2nd-order 3-tap pre-emphasis + rfft/abs/irfft ESR)
         and computes the arithmetic mean across batches:
           Val Loss = (1 / N) * sum(batch_loss)
-        with eps = 1e-20 (FUN_14003f820 / FUN_14003f9f0).
+        with eps = 1e-20.
         """
         self.model.eval()
         batch_losses = []
@@ -293,20 +297,12 @@ class AudioTrainer:
 
             pred = self.model(x, target_len=self.config.data.frame_size)
 
-            # Pre-emphasis filtered tensors (FUN_14003f1a0)
-            pred_f = self.val_esr.preemphasis(pred) if self.val_esr.preemphasis is not None else pred
-            tgt_f = self.val_esr.preemphasis(y) if self.val_esr.preemphasis is not None else y
-
             # 1. Time-domain ESR for this batch (FUN_14003f820)
-            err_time = tgt_f - pred_f
-            b_esr = (torch.sum(err_time ** 2) / (torch.sum(tgt_f ** 2) + 1e-20)).item()
+            b_esr = self.val_esr(pred, y).item()
             batch_esr.append(b_esr)
 
-            # 2. Spectral magnitude ESR for this batch (FUN_14003f9f0)
-            pred_mag = torch.abs(torch.fft.rfft(pred_f, dim=-1))
-            tgt_mag = torch.abs(torch.fft.rfft(tgt_f, dim=-1))
-            err_spec = tgt_mag - pred_mag
-            b_spec = (torch.sum(err_spec ** 2) / (torch.sum(tgt_mag ** 2) + 1e-20)).item()
+            # 2. Spectral / cepstral ESR for this batch (FUN_14003f9f0)
+            b_spec = self.val_spectral(pred, y).item()
             batch_spectral.append(b_spec)
 
             # Active loss for this batch (FUN_140042f00)
@@ -320,19 +316,28 @@ class AudioTrainer:
 
     @torch.no_grad()
     def render_full_prediction(self) -> np.ndarray:
-        """Renders the entire dry audio signal through the trained model."""
+        """
+        Renders the entire dry audio signal through the trained model with continuous
+        receptive-field overlap between chunks (matching FUN_140046280 / FUN_14003d4a0).
+        """
         self.model.eval()
         dry_tensor = torch.from_numpy(self.audio_data.dry).unsqueeze(0).unsqueeze(0).to(self.device)
-        
-        # Process in chunks to prevent VRAM overflow on long signals
-        chunk_len = 32768
+
+        # Process in chunks with receptive_field_pad overlap so chunk boundaries are seamless
+        chunk_len = 44100
+        rf_pad = self.model.receptive_field_pad
         total_samples = dry_tensor.shape[-1]
         preds = []
-        
+
         for start in range(0, total_samples, chunk_len):
             end = min(start + chunk_len, total_samples)
-            chunk = dry_tensor[:, :, start:end]
-            chunk_pred = self.model(chunk, target_len=chunk.shape[-1])
+            target_len = end - start
+            in_start = start - rf_pad
+            if in_start < 0:
+                chunk = torch.nn.functional.pad(dry_tensor[:, :, 0:end], (-in_start, 0))
+            else:
+                chunk = dry_tensor[:, :, in_start:end]
+            chunk_pred = self.model(chunk, target_len=target_len)
             preds.append(chunk_pred.squeeze().cpu().numpy())
 
         return np.concatenate(preds)

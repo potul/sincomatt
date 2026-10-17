@@ -21,14 +21,20 @@ class IRModel(BaseAmpModel):
     def model_tag(self) -> str:
         return f"IR{self.filter_size}"
 
+    @property
+    def receptive_field_pad(self) -> int:
+        return self.filter_size - 1
+
     def reset_parameters(self) -> None:
         nn.init.zeros_(self.fir.weight)
         with torch.no_grad():
             self.fir.weight[0, 0, self.filter_size - 1] = 1.0
 
     def forward(self, x: torch.Tensor, target_len: int = 512) -> torch.Tensor:
-        x_pad = F.pad(x, (self.filter_size - 1, 0))
-        out = self.fir(x_pad)
+        needed_len = target_len + self.receptive_field_pad
+        if x.shape[-1] < needed_len:
+            x = F.pad(x, (needed_len - x.shape[-1], 0))
+        out = self.fir(x)
         if out.shape[-1] > target_len:
             out = out[:, :, -target_len:]
         return out

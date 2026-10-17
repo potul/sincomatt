@@ -37,6 +37,10 @@ class AM4Model(BaseAmpModel):
     def model_tag(self) -> str:
         return "AM4"
 
+    @property
+    def receptive_field_pad(self) -> int:
+        return (self.fir1_size - 1) + (self.fir2_size - 1)
+
     def reset_parameters(self) -> None:
         # Initialize FIR1 and FIR2 close to causal identity (delta impulse at causal end tap K-1)
         nn.init.zeros_(self.fir1.weight)
@@ -59,28 +63,32 @@ class AM4Model(BaseAmpModel):
 
     def forward(self, x: torch.Tensor, target_len: int = 512) -> torch.Tensor:
         """
-        x shape: (B, 1, T_in) where T_in may be 512 + delay
-        returns: (B, 1, target_len)
+        Matches FUN_14003dec0 in AudioTrainHHAG.exe:
+        When x has shape (B, 1, target_len + receptive_field_pad) [e.g. 512 + 1022 = 1534],
+        fir1 and fir2 execute pure valid convolution (padding=0) over real historical audio:
+          1534 -> fir1 -> 1023 -> GRU -> Linear -> 1023 -> fir2 -> 512.
+        If x is shorter than target_len + receptive_field_pad, left-pads with zeros to maintain causality.
         """
-        # Causal input FIR filtering: pad left by (fir1_size - 1) samples
-        x = F.pad(x, (self.fir1_size - 1, 0))
+        needed_len = target_len + self.receptive_field_pad
+        if x.shape[-1] < needed_len:
+            x = F.pad(x, (needed_len - x.shape[-1], 0))
+
+        # Valid input FIR filtering: (B, 1, T) -> (B, 1, T - 511)
         x = self.fir1(x)
 
-        # Transpose to (B, T, 1) for GRU
+        # Transpose to (B, T - 511, 1) for GRU (warms up GRU state over 511 real samples!)
         x = x.transpose(1, 2)
         x, _ = self.rnn(x)
 
         # Linear projection
         x = self.ln(x)
 
-        # Transpose back to (B, 1, T)
+        # Transpose back to (B, 1, T - 511)
         x = x.transpose(1, 2)
 
-        # Causal output FIR filtering: pad left by (fir2_size - 1) samples
-        x = F.pad(x, (self.fir2_size - 1, 0))
+        # Valid output FIR filtering: (B, 1, T - 511) -> (B, 1, T - 1022)
         x = self.fir2(x)
 
-        # If input has delay padding, take the target slice
         if x.shape[-1] > target_len:
             x = x[:, :, -target_len:]
         return x

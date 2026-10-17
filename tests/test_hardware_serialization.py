@@ -126,7 +126,50 @@ class TestHardwareBinarySerialization(unittest.TestCase):
             y2_am3 = am3(x2, target_len=512)
             self.assertTrue(torch.allclose(y1_am3[:, :, :256], y2_am3[:, :, :256], atol=1e-6))
 
+    def test_receptive_field_lookback_and_finetuning_loss(self):
+        from audiotrain.data.dataset import AudioFrameDataset
+        from audiotrain.losses.spectral import SpectralESRLoss
+
+        am4 = AM4Model()
+        am3 = AM3Model()
+        ir1024 = IRModel(filter_size=1024)
+        self.assertEqual(am4.receptive_field_pad, 1022)
+        self.assertEqual(am3.receptive_field_pad, 573)
+        self.assertEqual(ir1024.receptive_field_pad, 1023)
+
+        # Verify AudioFrameDataset provides (512 + receptive_field_pad) dry samples
+        dry = np.arange(4096, dtype=np.float32)
+        wet = np.arange(4096, dtype=np.float32) * 2.0
+        ds = AudioFrameDataset(dry, wet, frame_size=512, receptive_field_pad=am4.receptive_field_pad)
+        self.assertEqual(len(ds), 8)
+
+        # Frame 0 should have 1022 leading zeros + 512 samples [0..511]
+        x0, y0 = ds[0]
+        self.assertEqual(x0.shape, (1, 1534))
+        self.assertEqual(y0.shape, (1, 512))
+        self.assertTrue(torch.all(x0[0, :1022] == 0.0))
+        self.assertTrue(torch.allclose(x0[0, 1022:], torch.arange(512, dtype=torch.float32)))
+
+        # Frame 2 (starts at 1024) should have zero artificial padding, purely continuous [2..1535]
+        x2, y2 = ds[2]
+        self.assertEqual(x2.shape, (1, 1534))
+        self.assertTrue(torch.allclose(x2[0], torch.arange(2, 1536, dtype=torch.float32)))
+
+        # Verify AM4 valid convolution on 1534-sample input produces 512-sample output
+        with torch.no_grad():
+            out_am4 = am4(x2.unsqueeze(0), target_len=512)
+            self.assertEqual(out_am4.shape, (1, 1, 512))
+
+        # Verify SpectralESRLoss runs 2nd-order pre-emphasis + irfft(abs(rfft))
+        spec_loss = SpectralESRLoss()
+        pred = torch.randn(2, 1, 512)
+        target = pred + 0.05 * torch.randn(2, 1, 512)
+        loss_val = spec_loss(pred, target)
+        self.assertTrue(torch.isfinite(loss_val))
+        self.assertGreater(loss_val.item(), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

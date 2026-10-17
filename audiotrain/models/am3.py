@@ -49,6 +49,10 @@ class AM3Model(BaseAmpModel):
     def model_tag(self) -> str:
         return "AM3"
 
+    @property
+    def receptive_field_pad(self) -> int:
+        return (self.cnn_kernel_size - 1) + (self.fir1_size - 1) + (self.fir2_size - 1)
+
     def reset_parameters(self) -> None:
         # Initializing CNN
         nn.init.xavier_uniform_(self.cnn.weight)
@@ -71,37 +75,40 @@ class AM3Model(BaseAmpModel):
 
     def forward(self, x: torch.Tensor, target_len: int = 512) -> torch.Tensor:
         """
-        x shape: (B, 1, T_in)
-        returns: (B, 1, target_len)
+        Matches FUN_14003dec0 in AudioTrainHHAG.exe:
+        When x has shape (B, 1, target_len + 573) [e.g. 512 + 573 = 1085],
+        cnn, fir1, and fir2 execute pure valid convolution (padding=0) over real historical audio:
+          1085 -> cnn -> 1022 -> fir1 -> 767 -> asinh -> GRU -> Linear -> 767 -> fir2 -> 512.
         """
-        # Multi-channel causal CNN filter bank
-        x_pad = F.pad(x, (self.cnn_kernel_size - 1, 0))
-        c = self.cnn(x_pad)
+        needed_len = target_len + self.receptive_field_pad
+        if x.shape[-1] < needed_len:
+            x = F.pad(x, (needed_len - x.shape[-1], 0))
+
+        # Multi-channel valid CNN filter bank: (B, 1, T) -> (B, 3, T - 63)
+        c = self.cnn(x)
         # Sum over channels to form input for FIR1
         x_cnn = torch.sum(c, dim=1, keepdim=True)
 
-        # Causal input FIR filtering
-        x = F.pad(x_cnn, (self.fir1_size - 1, 0))
-        x = self.fir1(x)
+        # Valid input FIR filtering: (B, 1, T - 63) -> (B, 1, T - 318)
+        x = self.fir1(x_cnn)
 
         # Non-linear saturation: arsinh(x) = ln(x + sqrt(x^2 + 1))
         x = torch.asinh(x)
 
-        # Transpose to (B, T, 1) for GRU
+        # Transpose to (B, T - 318, 1) for GRU
         x = x.transpose(1, 2)
         x, _ = self.rnn(x)
 
         # Linear projection
         x = self.ln(x)
 
-        # Transpose back to (B, 1, T)
+        # Transpose back to (B, 1, T - 318)
         x = x.transpose(1, 2)
 
-        # Causal output FIR filtering
-        x = F.pad(x, (self.fir2_size - 1, 0))
+        # Valid output FIR filtering: (B, 1, T - 318) -> (B, 1, T - 573)
         x = self.fir2(x)
 
-        # Crop to target length if delay padding was added
+        # Crop to target length if extra delay padding was present
         if x.shape[-1] > target_len:
             x = x[:, :, -target_len:]
         return x

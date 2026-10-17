@@ -10,11 +10,13 @@ from audiotrain.data.audio import LoadedAudio
 
 class AudioFrameDataset(Dataset):
     """
-    Framed dataset matching FUN_14003ad60 in AudioTrainHHAG.exe.
-    Slices continuous audio into frames of size 512 samples.
-    With input lookahead delay:
-      - Input chunk:  dry[i * 512 : i * 512 + 512 + delay] (length 512 + delay)
-      - Target chunk: target[i * 512 + delay : i * 512 + delay + 512] (length 512)
+    Framed dataset matching FUN_14003ad60 & FUN_14003bfd0 in AudioTrainHHAG.exe.
+    Slices continuous audio into target frames of size 512 samples, while providing
+    the preceding `receptive_field_pad` samples of real continuous dry audio so that
+    valid Conv1d layers (and GRU state warmup) operate on real historical context:
+      - Target chunk: target[i * 512 + delay : (i + 1) * 512 + delay] (length 512)
+      - Input chunk:  dry[i * 512 - receptive_field_pad : (i + 1) * 512] (length 512 + receptive_field_pad)
+        (left-padded with zeros only for the very first frame(s) where i * 512 < receptive_field_pad)
     """
     def __init__(
         self,
@@ -22,12 +24,14 @@ class AudioFrameDataset(Dataset):
         target: np.ndarray,
         frame_size: int = 512,
         delay: int = 0,
+        receptive_field_pad: int = 1022,
         start_frame: int = 0,
         num_frames: Optional[int] = None,
     ):
         super().__init__()
         self.frame_size = frame_size
         self.delay = max(0, delay)
+        self.receptive_field_pad = max(0, receptive_field_pad)
         self.dry = dry
         self.target = target
 
@@ -45,13 +49,17 @@ class AudioFrameDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         frame_idx = self.start_frame + idx
-        in_start = frame_idx * self.frame_size
-        in_end = in_start + self.frame_size + self.delay
+        frame_end = (frame_idx + 1) * self.frame_size
+        in_start = frame_idx * self.frame_size - self.receptive_field_pad
 
-        tgt_start = in_start + self.delay
+        if in_start < 0:
+            pad_zeros = -in_start
+            in_chunk = np.pad(self.dry[0:frame_end], (pad_zeros, 0), mode="constant")
+        else:
+            in_chunk = self.dry[in_start:frame_end]
+
+        tgt_start = frame_idx * self.frame_size + self.delay
         tgt_end = tgt_start + self.frame_size
-
-        in_chunk = self.dry[in_start:in_end]
         tgt_chunk = self.target[tgt_start:tgt_end]
 
         # Shape: (1, seq_len)
@@ -64,6 +72,7 @@ def create_train_val_datasets(
     loaded_audio: LoadedAudio,
     frame_size: int = 512,
     delay: int = 0,
+    receptive_field_pad: int = 1022,
     train_ratio: float = 0.6,
 ) -> Tuple[AudioFrameDataset, AudioFrameDataset]:
     """
@@ -80,6 +89,7 @@ def create_train_val_datasets(
         target=loaded_audio.target,
         frame_size=frame_size,
         delay=delay,
+        receptive_field_pad=receptive_field_pad,
         start_frame=0,
         num_frames=train_frames,
     )
@@ -89,6 +99,7 @@ def create_train_val_datasets(
         target=loaded_audio.target,
         frame_size=frame_size,
         delay=delay,
+        receptive_field_pad=receptive_field_pad,
         start_frame=train_frames,
         num_frames=val_frames,
     )
