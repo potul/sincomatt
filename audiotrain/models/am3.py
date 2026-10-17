@@ -8,10 +8,10 @@ from audiotrain.models.base import BaseAmpModel
 class AM3Model(BaseAmpModel):
     """
     AM3 Architecture:
-      - cnn:  Conv1d(1, 3, kernel_size=32, bias=False, padding='same')
+      - cnn:  Conv1d(1, 3, kernel_size=64, bias=False, padding='same')
       - fir1: Conv1d(1, 1, kernel_size=256, bias=False, padding='same')
       - arsinh non-linear saturation: asinh(x) = ln(x + sqrt(x^2 + 1))
-      - rnn:  GRU(input_size=1, hidden_size=16, num_layers=1, batch_first=True, bias=True)
+      - rnn:  GRU(input_size=1, hidden_size=16, num_layers=1, batch_first=True, bias=False)
       - ln:   Linear(in_features=16, out_features=1, bias=False)
       - fir2: Conv1d(1, 1, kernel_size=256, bias=False, padding='same')
     """
@@ -20,7 +20,7 @@ class AM3Model(BaseAmpModel):
         fir1_size: int = 256,
         fir2_size: int = 256,
         cnn_channels: int = 3,
-        cnn_kernel_size: int = 32,
+        cnn_kernel_size: int = 64,
         hidden_size: int = 16,
     ):
         super().__init__()
@@ -37,7 +37,7 @@ class AM3Model(BaseAmpModel):
             hidden_size=hidden_size,
             num_layers=1,
             batch_first=True,
-            bias=True,
+            bias=False,
         )
         self.ln = nn.Linear(in_features=hidden_size, out_features=1, bias=False)
         self.fir2 = nn.Conv1d(1, 1, kernel_size=fir2_size, bias=False, padding="same")
@@ -63,12 +63,10 @@ class AM3Model(BaseAmpModel):
         with torch.no_grad():
             self.fir2.weight[0, 0, center2] = 1.0
 
-        # GRU initialization
+        # GRU initialization (bias=False in AM3)
         for name, param in self.rnn.named_parameters():
             if "weight" in name:
                 nn.init.orthogonal_(param)
-            elif "bias" in name:
-                nn.init.zeros_(param)
 
         nn.init.xavier_uniform_(self.ln.weight)
 
@@ -108,32 +106,28 @@ class AM3Model(BaseAmpModel):
 
     def export_weights_array(self) -> torch.Tensor:
         """
-        Exact binary layout verified against kpa-blue.am3Data:
-          fir1 (256)
-          rnn.weight_ih_l0 (48)
-          rnn.weight_hh_l0 (768)
-          rnn.bias_ih_l0 (48)
-          rnn.bias_hh_l0 (48)
-          ln.weight (16)
-          cnn.weight (96)
-          fir2 (256)
-        Total floats = 1536
+        Exact binary layout verified against AudioTrainHHAG.exe and kpa-blue.am3Data:
+          1. fir1 (256)
+          2. rnn.weight_ih_l0 (48)
+          3. rnn.weight_hh_l0 (768)
+          4. ln.weight (16)
+          5. fir2 (256)
+          6. cnn.weight (192)
+        Total floats = 1536 (6144 bytes)
         """
         with torch.no_grad():
             fir1_w = self.fir1.weight.detach().cpu().view(-1)
             w_ih = self.rnn.weight_ih_l0.detach().cpu().view(-1)
             w_hh = self.rnn.weight_hh_l0.detach().cpu().view(-1)
-            b_ih = self.rnn.bias_ih_l0.detach().cpu().view(-1)
-            b_hh = self.rnn.bias_hh_l0.detach().cpu().view(-1)
             ln_w = self.ln.weight.detach().cpu().view(-1)
-            cnn_w = self.cnn.weight.detach().cpu().view(-1)
             fir2_w = self.fir2.weight.detach().cpu().view(-1)
+            cnn_w = self.cnn.weight.detach().cpu().view(-1)
 
-            tensors = [fir1_w, w_ih, w_hh, b_ih, b_hh, ln_w, cnn_w, fir2_w]
+            tensors = [fir1_w, w_ih, w_hh, ln_w, fir2_w, cnn_w]
             return torch.cat(tensors, dim=0).to(torch.float32)
 
     def load_weights_array(self, weights: torch.Tensor) -> None:
-        """Loads weights from contiguous 1D float32 array."""
+        """Loads weights from contiguous 1D float32 array matching AudioTrainHHAG.exe."""
         w = weights.view(-1).cpu()
         idx = 0
 
@@ -142,7 +136,7 @@ class AM3Model(BaseAmpModel):
         self.fir1.weight.data.copy_(w[idx : idx + f1_num].view_as(self.fir1.weight))
         idx += f1_num
 
-        # rnn
+        # rnn (bias=False)
         w_ih_num = self.rnn.weight_ih_l0.numel()
         self.rnn.weight_ih_l0.data.copy_(w[idx : idx + w_ih_num].view_as(self.rnn.weight_ih_l0))
         idx += w_ih_num
@@ -151,25 +145,17 @@ class AM3Model(BaseAmpModel):
         self.rnn.weight_hh_l0.data.copy_(w[idx : idx + w_hh_num].view_as(self.rnn.weight_hh_l0))
         idx += w_hh_num
 
-        b_ih_num = self.rnn.bias_ih_l0.numel()
-        self.rnn.bias_ih_l0.data.copy_(w[idx : idx + b_ih_num].view_as(self.rnn.bias_ih_l0))
-        idx += b_ih_num
-
-        b_hh_num = self.rnn.bias_hh_l0.numel()
-        self.rnn.bias_hh_l0.data.copy_(w[idx : idx + b_hh_num].view_as(self.rnn.bias_hh_l0))
-        idx += b_hh_num
-
         # ln
         ln_num = self.ln.weight.numel()
         self.ln.weight.data.copy_(w[idx : idx + ln_num].view_as(self.ln.weight))
         idx += ln_num
 
-        # cnn
-        cnn_num = self.cnn.weight.numel()
-        self.cnn.weight.data.copy_(w[idx : idx + cnn_num].view_as(self.cnn.weight))
-        idx += cnn_num
-
         # fir2
         f2_num = self.fir2.weight.numel()
         self.fir2.weight.data.copy_(w[idx : idx + f2_num].view_as(self.fir2.weight))
         idx += f2_num
+
+        # cnn
+        cnn_num = self.cnn.weight.numel()
+        self.cnn.weight.data.copy_(w[idx : idx + cnn_num].view_as(self.cnn.weight))
+        idx += cnn_num
