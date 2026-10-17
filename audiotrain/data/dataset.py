@@ -112,13 +112,16 @@ def get_dataloaders(
         drop_last=False,
     )
 
+    # AudioTrainHHAG.exe processes full batches for validation loss averaging,
+    # dropping trailing fractional frames (fading silence) that distort unweighted batch averages.
+    val_drop_last = len(val_dataset) >= batch_size
     val_loader = DataLoader(
         val_dataset,
         batch_size=min(batch_size, len(val_dataset)) if len(val_dataset) > 0 else 1,
         shuffle=False,
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
-        drop_last=False,
+        drop_last=val_drop_last,
     )
 
     return train_loader, val_loader

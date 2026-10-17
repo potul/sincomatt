@@ -64,7 +64,7 @@ class AudioTrainer:
             weight_decay=self.config.training.weight_decay,
         )
 
-        fine_tuning_epoch = int(self.config.training.epochs * self.config.training.fine_tuning_ratio)
+        fine_tuning_epoch = int(self.config.training.epochs * self.config.training.fine_tuning_ratio) + 1
         self.criterion = CurriculumLoss(fine_tuning_epoch=fine_tuning_epoch).to(self.device)
         self.val_esr = ESRLoss(use_preemphasis=True).to(self.device)
         self.val_spectral = SpectralESRLoss(use_preemphasis=True).to(self.device)
@@ -276,15 +276,16 @@ class AudioTrainer:
     @torch.no_grad()
     def validate(self) -> Tuple[float, float, float]:
         """
-        Computes dataset-level validation metrics over the entire validation partition.
-        Accumulating squared error and target energy globally ensures numerical stability
-        and prevents zero-division singularities when trailing silence occurs in audio captures.
+        Computes validation metrics matching AudioTrainHHAG.exe (FUN_140044EE0 - FUN_140045082):
+        Evaluates each batch through the active loss function (BasicTuning ESR or FineTuning Spectral)
+        and computes the arithmetic mean across batches:
+          Val Loss = (1 / N) * sum(batch_loss)
+        with eps = 1e-20 (FUN_14003f820 / FUN_14003f9f0).
         """
         self.model.eval()
-        total_time_err = 0.0
-        total_time_tgt = 0.0
-        total_spec_err = 0.0
-        total_spec_tgt = 0.0
+        batch_losses = []
+        batch_esr = []
+        batch_spectral = []
 
         for x, y in self.val_loader:
             x = x.to(self.device)
@@ -292,24 +293,30 @@ class AudioTrainer:
 
             pred = self.model(x, target_len=self.config.data.frame_size)
 
-            # Pre-emphasis filtered tensors
+            # Pre-emphasis filtered tensors (FUN_14003f1a0)
             pred_f = self.val_esr.preemphasis(pred) if self.val_esr.preemphasis is not None else pred
             tgt_f = self.val_esr.preemphasis(y) if self.val_esr.preemphasis is not None else y
 
-            # Time-domain ESR components
-            total_time_err += torch.sum((tgt_f - pred_f) ** 2).item()
-            total_time_tgt += torch.sum(tgt_f ** 2).item()
+            # 1. Time-domain ESR for this batch (FUN_14003f820)
+            err_time = tgt_f - pred_f
+            b_esr = (torch.sum(err_time ** 2) / (torch.sum(tgt_f ** 2) + 1e-20)).item()
+            batch_esr.append(b_esr)
 
-            # Spectral magnitude ESR components
+            # 2. Spectral magnitude ESR for this batch (FUN_14003f9f0)
             pred_mag = torch.abs(torch.fft.rfft(pred_f, dim=-1))
             tgt_mag = torch.abs(torch.fft.rfft(tgt_f, dim=-1))
-            total_spec_err += torch.sum((tgt_mag - pred_mag) ** 2).item()
-            total_spec_tgt += torch.sum(tgt_mag ** 2).item()
+            err_spec = tgt_mag - pred_mag
+            b_spec = (torch.sum(err_spec ** 2) / (torch.sum(tgt_mag ** 2) + 1e-20)).item()
+            batch_spectral.append(b_spec)
 
-        esr = total_time_err / (total_time_tgt + 1e-8)
-        spec = total_spec_err / (total_spec_tgt + 1e-8)
-        loss = spec if self.criterion.is_fine_tuning else esr
-        return loss, esr, spec
+            # Active loss for this batch (FUN_140042f00)
+            b_loss = b_spec if self.criterion.is_fine_tuning else b_esr
+            batch_losses.append(b_loss)
+
+        avg_loss = float(np.mean(batch_losses)) if batch_losses else 0.0
+        avg_esr = float(np.mean(batch_esr)) if batch_esr else 0.0
+        avg_spectral = float(np.mean(batch_spectral)) if batch_spectral else 0.0
+        return avg_loss, avg_esr, avg_spectral
 
     @torch.no_grad()
     def render_full_prediction(self) -> np.ndarray:
@@ -415,7 +422,16 @@ class AudioTrainer:
 
         start_time = time.time()
         for epoch in range(1, epochs + 1):
-            if not self.config.training.show_batch_progress and (epoch == 1 or epoch == self.criterion.fine_tuning_epoch):
+            if epoch == self.criterion.fine_tuning_epoch:
+                # Matches 0x1400450BF in AudioTrainHHAG.exe:
+                # Reset best loss tracker when transitioning to FineTuning spectral loss scale
+                self.best_val_loss = float("inf")
+                patience_counter = 0
+                logger.info(
+                    f"-> Transitioning to FineTuning Stage [Spectral]. "
+                    f"Resetting best loss tracker (matching AudioTrainHHAG.exe)..."
+                )
+            elif not self.config.training.show_batch_progress and epoch == 1:
                 stage_hint = "FineTuning [Spectral]" if self.criterion.is_fine_tuning else "BasicTuning [ESR]"
                 logger.info(f"-> Processing Epoch {epoch}/{epochs} ({stage_hint})...")
 

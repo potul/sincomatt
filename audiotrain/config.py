@@ -86,7 +86,7 @@ class TrainingConfig:
     learning_rate: float = 0.0008
     weight_decay: float = 1e-4
     # Epoch fraction where training switches from BasicTuning (ESR) to FineTuning (Spectral)
-    fine_tuning_ratio: float = 0.70
+    fine_tuning_ratio: float = 0.80
     patience: int = 50
     device: str = "cuda"  # Auto falls back to cpu if cuda unavailable
     seed: int = 42

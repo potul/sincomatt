@@ -10,7 +10,7 @@ class SpectralESRLoss(nn.Module):
     Pre-emphasized Spectral Magnitude Loss (FineTuning stage):
     Loss = sum((|rfft(y_filt)| - |rfft(pred_filt)|)^2) / (sum(|rfft(y_filt)|^2) + eps)
     """
-    def __init__(self, use_preemphasis: bool = True, eps: float = 1e-8):
+    def __init__(self, use_preemphasis: bool = True, eps: float = 1e-20):
         super().__init__()
         self.use_preemphasis = use_preemphasis
         self.preemphasis = PreEmphasisFilter() if use_preemphasis else None
