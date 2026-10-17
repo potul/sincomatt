@@ -17,14 +17,16 @@ class ESRLoss(nn.Module):
         self.preemphasis = PreEmphasisFilter() if use_preemphasis else None
         self.eps = eps
 
-    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def transform(self, x: torch.Tensor) -> torch.Tensor:
         if self.preemphasis is not None:
-            pred_f = self.preemphasis(pred)
-            target_f = self.preemphasis(target)
-        else:
-            pred_f = pred
-            target_f = target
+            return self.preemphasis(x)
+        return x
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        pred_f = self.transform(pred)
+        target_f = self.transform(target)
 
         error = target_f - pred_f
         loss = torch.sum(error ** 2) / (torch.sum(target_f ** 2) + self.eps)
         return loss
+

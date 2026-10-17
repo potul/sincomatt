@@ -168,8 +168,46 @@ class TestHardwareBinarySerialization(unittest.TestCase):
         self.assertTrue(torch.isfinite(loss_val))
         self.assertGreater(loss_val.item(), 0.0)
 
+    def test_exact_microbatch_gradient_accumulation(self):
+        import copy
+        from audiotrain.losses.curriculum import CurriculumLoss
+
+        for epoch in (1, 900):  # Test both BasicTuning (epoch=1) and FineTuning (epoch=900)
+            torch.manual_seed(123)
+            m_full = AM4Model()
+            m_micro = copy.deepcopy(m_full)
+            criterion = CurriculumLoss(fine_tuning_epoch=801)
+            criterion.set_epoch(epoch)
+
+            x = torch.randn(16, 1, 1534)
+            y = torch.randn(16, 1, 512)
+
+            # Full batch forward + backward
+            pred_full = m_full(x, target_len=512)
+            loss_full = criterion(pred_full, y)
+            loss_full.backward()
+
+            # Micro-batched (chunk=4) forward + backward
+            with torch.no_grad():
+                y_trans = criterion.transform(y)
+                denom = torch.sum(y_trans ** 2) + criterion.eps
+            loss_micro_val = 0.0
+            for start in range(0, 16, 4):
+                x_c = x[start : start + 4]
+                y_c_trans = y_trans[start : start + 4]
+                pred_c = m_micro(x_c, target_len=512)
+                pred_c_trans = criterion.transform(pred_c)
+                c_loss = torch.sum((y_c_trans - pred_c_trans) ** 2) / denom
+                c_loss.backward()
+                loss_micro_val += c_loss.item()
+
+            self.assertAlmostEqual(loss_full.item(), loss_micro_val, places=6)
+            for p1, p2 in zip(m_full.parameters(), m_micro.parameters()):
+                self.assertTrue(torch.allclose(p1.grad, p2.grad, atol=1e-6))
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

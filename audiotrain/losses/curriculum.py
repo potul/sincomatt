@@ -26,7 +26,17 @@ class CurriculumLoss(nn.Module):
     def is_fine_tuning(self) -> bool:
         return self.current_epoch >= self.fine_tuning_epoch
 
+    @property
+    def eps(self) -> float:
+        return self.spectral_loss.eps if self.is_fine_tuning else self.esr_loss.eps
+
+    def transform(self, x: torch.Tensor) -> torch.Tensor:
+        if self.is_fine_tuning:
+            return self.spectral_loss.transform(x)
+        return self.esr_loss.transform(x)
+
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         if self.is_fine_tuning:
             return self.spectral_loss(pred, target)
         return self.esr_loss(pred, target)
+
