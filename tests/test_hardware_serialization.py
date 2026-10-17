@@ -1,9 +1,11 @@
 import unittest
 from pathlib import Path
 import numpy as np
+import torch
 
 from audiotrain.models.am4 import AM4Model
 from audiotrain.models.am3 import AM3Model
+from audiotrain.models.ir import IRModel
 from audiotrain.serialization.binary_format import (
     pack_am_data,
     unpack_am_data,
@@ -93,6 +95,38 @@ class TestHardwareBinarySerialization(unittest.TestCase):
         self.assertEqual(len(repacked), len(orig))
         self.assertEqual(orig, repacked)
 
+    def test_causal_padding_and_impulse_init(self):
+        am4 = AM4Model()
+        self.assertEqual(am4.fir1.weight[0, 0, -1].item(), 1.0)
+        self.assertEqual(am4.fir2.weight[0, 0, -1].item(), 1.0)
+
+        am3 = AM3Model()
+        self.assertEqual(am3.fir1.weight[0, 0, -1].item(), 1.0)
+        self.assertEqual(am3.fir2.weight[0, 0, -1].item(), 1.0)
+
+        ir = IRModel(filter_size=1024)
+        self.assertEqual(ir.fir.weight[0, 0, -1].item(), 1.0)
+
+        # Verify causal IR pass-through has zero phase shift (y[t] == x[t])
+        x = torch.randn(2, 1, 512)
+        y_ir = ir(x, target_len=512)
+        self.assertTrue(torch.allclose(x, y_ir, atol=1e-6))
+
+        # Verify causality on AM4 and AM3: changing future samples x[:, :, t+1:] must not affect y[:, :, :t+1]
+        x1 = torch.randn(1, 1, 512)
+        x2 = x1.clone()
+        x2[:, :, 256:] += 10.0
+
+        with torch.no_grad():
+            y1_am4 = am4(x1, target_len=512)
+            y2_am4 = am4(x2, target_len=512)
+            self.assertTrue(torch.allclose(y1_am4[:, :, :256], y2_am4[:, :, :256], atol=1e-6))
+
+            y1_am3 = am3(x1, target_len=512)
+            y2_am3 = am3(x2, target_len=512)
+            self.assertTrue(torch.allclose(y1_am3[:, :, :256], y2_am3[:, :, :256], atol=1e-6))
+
 
 if __name__ == "__main__":
     unittest.main()
+

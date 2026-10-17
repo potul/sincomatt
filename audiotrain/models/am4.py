@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from audiotrain.models.base import BaseAmpModel
 
 
 class AM4Model(BaseAmpModel):
     """
     AM4 Architecture:
-      - fir1: Conv1d(1, 1, kernel_size=512, bias=False, padding='same')
+      - fir1: Conv1d(1, 1, kernel_size=512, bias=False, causal left-padding=511)
       - rnn:  GRU(input_size=1, hidden_size=16, num_layers=1, batch_first=True, bias=True)
       - ln:   Linear(in_features=16, out_features=1, bias=False)
-      - fir2: Conv1d(1, 1, kernel_size=512, bias=False, padding='same')
+      - fir2: Conv1d(1, 1, kernel_size=512, bias=False, causal left-padding=511)
     """
     def __init__(self, fir1_size: int = 512, fir2_size: int = 512, hidden_size: int = 16):
         super().__init__()
@@ -19,7 +20,7 @@ class AM4Model(BaseAmpModel):
         self.fir2_size = fir2_size
         self.hidden_size = hidden_size
 
-        self.fir1 = nn.Conv1d(1, 1, kernel_size=fir1_size, bias=False, padding="same")
+        self.fir1 = nn.Conv1d(1, 1, kernel_size=fir1_size, bias=False, padding=0)
         self.rnn = nn.GRU(
             input_size=1,
             hidden_size=hidden_size,
@@ -28,7 +29,7 @@ class AM4Model(BaseAmpModel):
             bias=True,
         )
         self.ln = nn.Linear(in_features=hidden_size, out_features=1, bias=False)
-        self.fir2 = nn.Conv1d(1, 1, kernel_size=fir2_size, bias=False, padding="same")
+        self.fir2 = nn.Conv1d(1, 1, kernel_size=fir2_size, bias=False, padding=0)
 
         self.reset_parameters()
 
@@ -37,16 +38,14 @@ class AM4Model(BaseAmpModel):
         return "AM4"
 
     def reset_parameters(self) -> None:
-        # Initialize FIR1 and FIR2 close to identity (delta impulse at center)
+        # Initialize FIR1 and FIR2 close to causal identity (delta impulse at causal end tap K-1)
         nn.init.zeros_(self.fir1.weight)
-        center1 = self.fir1_size // 2
         with torch.no_grad():
-            self.fir1.weight[0, 0, center1] = 1.0
+            self.fir1.weight[0, 0, self.fir1_size - 1] = 1.0
 
         nn.init.zeros_(self.fir2.weight)
-        center2 = self.fir2_size // 2
         with torch.no_grad():
-            self.fir2.weight[0, 0, center2] = 1.0
+            self.fir2.weight[0, 0, self.fir2_size - 1] = 1.0
 
         # GRU initialization
         for name, param in self.rnn.named_parameters():
@@ -63,7 +62,8 @@ class AM4Model(BaseAmpModel):
         x shape: (B, 1, T_in) where T_in may be 512 + delay
         returns: (B, 1, target_len)
         """
-        # Input FIR filtering
+        # Causal input FIR filtering: pad left by (fir1_size - 1) samples
+        x = F.pad(x, (self.fir1_size - 1, 0))
         x = self.fir1(x)
 
         # Transpose to (B, T, 1) for GRU
@@ -76,7 +76,8 @@ class AM4Model(BaseAmpModel):
         # Transpose back to (B, 1, T)
         x = x.transpose(1, 2)
 
-        # Output FIR filtering
+        # Causal output FIR filtering: pad left by (fir2_size - 1) samples
+        x = F.pad(x, (self.fir2_size - 1, 0))
         x = self.fir2(x)
 
         # If input has delay padding, take the target slice

@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from audiotrain.models.base import BaseAmpModel
 
 
 class AM3Model(BaseAmpModel):
     """
     AM3 Architecture:
-      - cnn:  Conv1d(1, 3, kernel_size=64, bias=False, padding='same')
-      - fir1: Conv1d(1, 1, kernel_size=256, bias=False, padding='same')
+      - cnn:  Conv1d(1, 3, kernel_size=64, bias=False, causal left-padding=63)
+      - fir1: Conv1d(1, 1, kernel_size=256, bias=False, causal left-padding=255)
       - arsinh non-linear saturation: asinh(x) = ln(x + sqrt(x^2 + 1))
       - rnn:  GRU(input_size=1, hidden_size=16, num_layers=1, batch_first=True, bias=False)
       - ln:   Linear(in_features=16, out_features=1, bias=False)
-      - fir2: Conv1d(1, 1, kernel_size=256, bias=False, padding='same')
+      - fir2: Conv1d(1, 1, kernel_size=256, bias=False, causal left-padding=255)
     """
     def __init__(
         self,
@@ -30,8 +31,8 @@ class AM3Model(BaseAmpModel):
         self.cnn_kernel_size = cnn_kernel_size
         self.hidden_size = hidden_size
 
-        self.cnn = nn.Conv1d(1, cnn_channels, kernel_size=cnn_kernel_size, bias=False, padding="same")
-        self.fir1 = nn.Conv1d(1, 1, kernel_size=fir1_size, bias=False, padding="same")
+        self.cnn = nn.Conv1d(1, cnn_channels, kernel_size=cnn_kernel_size, bias=False, padding=0)
+        self.fir1 = nn.Conv1d(1, 1, kernel_size=fir1_size, bias=False, padding=0)
         self.rnn = nn.GRU(
             input_size=1,
             hidden_size=hidden_size,
@@ -40,7 +41,7 @@ class AM3Model(BaseAmpModel):
             bias=False,
         )
         self.ln = nn.Linear(in_features=hidden_size, out_features=1, bias=False)
-        self.fir2 = nn.Conv1d(1, 1, kernel_size=fir2_size, bias=False, padding="same")
+        self.fir2 = nn.Conv1d(1, 1, kernel_size=fir2_size, bias=False, padding=0)
 
         self.reset_parameters()
 
@@ -52,16 +53,14 @@ class AM3Model(BaseAmpModel):
         # Initializing CNN
         nn.init.xavier_uniform_(self.cnn.weight)
 
-        # FIR initialization close to identity
+        # FIR initialization close to causal identity (delta impulse at causal end tap K-1)
         nn.init.zeros_(self.fir1.weight)
-        center1 = self.fir1_size // 2
         with torch.no_grad():
-            self.fir1.weight[0, 0, center1] = 1.0
+            self.fir1.weight[0, 0, self.fir1_size - 1] = 1.0
 
         nn.init.zeros_(self.fir2.weight)
-        center2 = self.fir2_size // 2
         with torch.no_grad():
-            self.fir2.weight[0, 0, center2] = 1.0
+            self.fir2.weight[0, 0, self.fir2_size - 1] = 1.0
 
         # GRU initialization (bias=False in AM3)
         for name, param in self.rnn.named_parameters():
@@ -75,13 +74,15 @@ class AM3Model(BaseAmpModel):
         x shape: (B, 1, T_in)
         returns: (B, 1, target_len)
         """
-        # Multi-channel CNN filter bank
-        c = self.cnn(x)
+        # Multi-channel causal CNN filter bank
+        x_pad = F.pad(x, (self.cnn_kernel_size - 1, 0))
+        c = self.cnn(x_pad)
         # Sum over channels to form input for FIR1
         x_cnn = torch.sum(c, dim=1, keepdim=True)
 
-        # Input FIR filtering
-        x = self.fir1(x_cnn)
+        # Causal input FIR filtering
+        x = F.pad(x_cnn, (self.fir1_size - 1, 0))
+        x = self.fir1(x)
 
         # Non-linear saturation: arsinh(x) = ln(x + sqrt(x^2 + 1))
         x = torch.asinh(x)
@@ -96,7 +97,8 @@ class AM3Model(BaseAmpModel):
         # Transpose back to (B, 1, T)
         x = x.transpose(1, 2)
 
-        # Output FIR filtering
+        # Causal output FIR filtering
+        x = F.pad(x, (self.fir2_size - 1, 0))
         x = self.fir2(x)
 
         # Crop to target length if delay padding was added
