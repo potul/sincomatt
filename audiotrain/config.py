@@ -65,7 +65,7 @@ class ModelConfig:
     rnn_hidden_size: int = 16
     rnn_num_layers: int = 1
     # AM3 specific
-    cnn_kernel_size: int = 32
+    cnn_kernel_size: int = 64
     cnn_channels: int = 3
     # Equalizer metadata preserved in binary export
     eq_bass_freq: float = 100.0
@@ -147,6 +147,8 @@ class AppConfig:
         if mt == ModelType.AM3 or mt == ModelType.NAM_TO_AM3:
             self.model.fir1_size = 256
             self.model.fir2_size = 256
+            self.model.cnn_kernel_size = 64
+            self.model.cnn_channels = 3
         elif mt == ModelType.AM4 or mt == ModelType.NAM_TO_AM4:
             self.model.fir1_size = 512
             self.model.fir2_size = 512

@@ -205,9 +205,76 @@ class TestHardwareBinarySerialization(unittest.TestCase):
             for p1, p2 in zip(m_full.parameters(), m_micro.parameters()):
                 self.assertTrue(torch.allclose(p1.grad, p2.grad, atol=1e-6))
 
+    def test_all_modes_end_to_end(self):
+        import tempfile
+        import soundfile as sf
+        from audiotrain.config import AppConfig, ModelType
+        from audiotrain.trainer import AudioTrainer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_p = Path(tmpdir)
+            sr = 44100
+            # Create a short 0.5s stereo WAV for fast end-to-end testing of all modes
+            t = np.linspace(0, 0.5, sr // 2, dtype=np.float32)
+            dry = 0.5 * np.sin(2 * np.pi * 220.0 * t)
+            wet = np.tanh(2.0 * dry)
+            wav_file = tmp_p / "synth.wav"
+            sf.write(str(wav_file), np.stack([dry, wet], axis=1), sr)
+
+            expected_sizes = {
+                ModelType.AM3: 60 + 1536 * 4,     # 6,204 bytes
+                ModelType.AM4: 60 + 1952 * 4,     # 7,868 bytes
+                ModelType.IR1024: 60 + 1024 * 4,  # 4,156 bytes
+                ModelType.IR2048: 60 + 2048 * 4,  # 8,252 bytes
+            }
+
+            for mtype, exp_bytes in expected_sizes.items():
+                cfg = AppConfig()
+                cfg.samples_path = str(wav_file)
+                cfg.output_dir = str(tmp_p / mtype.name)
+                cfg.model.model_type = mtype
+                cfg.model.model_name = f"test_{mtype.name.lower()}"
+                cfg.apply_model_defaults()
+                cfg.training.epochs = 2
+                cfg.training.batch_size = 16
+                cfg.training.device = "cpu"
+                cfg.render_audio = True
+
+                trainer = AudioTrainer(cfg)
+                trained_model = trainer.train()
+                self.assertIsNotNone(trained_model)
+
+                out_files = list(Path(cfg.output_dir).glob("*Data"))
+                self.assertEqual(len(out_files), 1, f"Expected 1 binary file for {mtype.name}")
+                self.assertEqual(out_files[0].stat().st_size, exp_bytes, f"Size mismatch for {mtype.name}")
+
+            # Test NAM_TO_AM3 and NAM_TO_AM4 if Fender.nam exists
+            nam_file = Path("Fender/Fender.nam")
+            if nam_file.is_file():
+                for mtype, exp_bytes in ((ModelType.NAM_TO_AM3, 6204), (ModelType.NAM_TO_AM4, 7868)):
+                    cfg = AppConfig()
+                    cfg.samples_path = str(nam_file)
+                    cfg.nam_path = str(nam_file)
+                    cfg.dry_path = str(wav_file)
+                    cfg.output_dir = str(tmp_p / mtype.name)
+                    cfg.model.model_type = mtype
+                    cfg.model.model_name = f"test_{mtype.name.lower()}"
+                    cfg.apply_model_defaults()
+                    cfg.training.epochs = 2
+                    cfg.training.batch_size = 16
+                    cfg.training.device = "cpu"
+                    cfg.render_audio = False
+
+                    trainer = AudioTrainer(cfg)
+                    trained_model = trainer.train()
+                    out_files = list(Path(cfg.output_dir).glob("*Data"))
+                    self.assertEqual(len(out_files), 1)
+                    self.assertEqual(out_files[0].stat().st_size, exp_bytes)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
