@@ -86,8 +86,9 @@ class AM3Model(BaseAmpModel):
 
         # Multi-channel valid CNN filter bank: (B, 1, T) -> (B, 3, T - 63)
         c = self.cnn(x)
-        # Sum over channels to form input for FIR1
-        x_cnn = torch.sum(c, dim=1, keepdim=True)
+        # Hardware AM3 quadratic Volterra / gated product (FUN_14003dec0 at 0x14003e43b-0x14003e464):
+        # x_cnn = c0 * c1 + c2
+        x_cnn = c[:, 0:1, :] * c[:, 1:2, :] + c[:, 2:3, :]
 
         # Valid input FIR filtering: (B, 1, T - 63) -> (B, 1, T - 318)
         x = self.fir1(x_cnn)
