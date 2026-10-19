@@ -7,13 +7,13 @@ AudioTrain is a modern, modular PyTorch neural amplifier training suite. It impl
 ## Key Highlights
 
 - **Exact Architectural Fidelity**:
-  - **AM4**: 512-tap input FIR filter $\to$ GRU ($H=16$, $L=1$) $\to$ Linear ($16 \to 1$) $\to$ 512-tap output FIR filter.
-  - **AM3**: Multi-channel CNN filter bank $\to$ 256-tap input FIR $\to \operatorname{arsinh}(x)$ saturation $\to$ GRU ($H=16$) $\to$ Linear $\to$ 256-tap output FIR.
+  - **AM4**: 512-tap input FIR filter → GRU ($H=16, L=1$) → Linear ($16 \to 1$) → 512-tap output FIR filter.
+  - **AM3**: Multi-channel CNN filter bank → 256-tap input FIR → `asinh(x)` saturation → GRU ($H=16$) → Linear → 256-tap output FIR.
   - **IR1024 / IR2048**: Linear impulse response convolution models (1024 or 2048 taps).
   - **NAM Importer / Distillation**: Full Neural Amp Modeler (`.nam` WaveNet) support, allowing distillation of third-party NAM models directly into lightweight AM3/AM4 hardware profiles.
 - **Two-Phase Curriculum Training**:
-  - **Phase 1: BasicTuning** ($Epoch < 80\%$): Pre-emphasized Time-Domain Error-to-Signal Ratio (ESR) with filter $y[n] = x[n] - 0.7225 x[n-2]$.
-  - **Phase 2: FineTuning** ($Epoch \ge 80\%$): Pre-emphasized Spectral/Cepstral Loss with filter $H(z) = (1 - 0.85 z^{-1})^2$ and zero-phase FFT transform.
+  - **Phase 1: BasicTuning** ($\text{Epoch} < 80\%$): Pre-emphasized Time-Domain Error-to-Signal Ratio (ESR) with filter $y[n] = x[n] - 0.7225 x[n-2]$.
+  - **Phase 2: FineTuning** ($\text{Epoch} \ge 80\%$): Pre-emphasized Spectral/Cepstral Loss with filter $H(z) = (1 - 0.85 z^{-1})^2$ and zero-phase FFT transform.
 - **Automatic Re-amp Profile Detection (NAM vs. Legacy 60/40)**:
   - Automatically inspects Channel 0 (`dry`) of stereo WAV captures to detect whether the recording used a **NAM test signal** (`v3_0_0.wav`, `v2_0_0.wav`, `v1_1_1.wav`, or `Proteus_Capture.wav`) or a **legacy ANN / custom signal**, applying the optimal training and validation split for each.
 - **Hardware-Ready Serialization**:
