@@ -83,7 +83,7 @@ def load_and_preprocess_audio(
     dry = dry[:min_len]
     target = target[:min_len]
 
-    # Peak normalization (FUN_14003bfd0 in binary)
+    # Peak normalization
     dry_loudness = float(np.max(np.abs(dry))) if len(dry) > 0 else 1.0
     target_loudness = float(np.max(np.abs(target))) if len(target) > 0 else 1.0
 

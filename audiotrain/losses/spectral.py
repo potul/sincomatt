@@ -7,10 +7,10 @@ from audiotrain.losses.preemphasis import SpectralPreEmphasisFilter
 
 class SpectralESRLoss(nn.Module):
     """
-    Pre-emphasized Spectral / Cepstral Loss (FineTuning stage, FUN_14003f9f0):
-      1. 2nd-order pre-emphasis (FUN_14003eb70): y[n] = x[n] - 1.7*x[n-1] + 0.7225*x[n-2]
-      2. Zero-phase spectral transform (FUN_14003f560): z = irfft(|rfft(y)|)
-      3. ESR (FUN_14003f9f0): sum((z_target - z_pred)^2) / (sum(z_target^2) + eps)
+    Pre-emphasized Spectral / Cepstral Loss (FineTuning stage):
+      1. 2nd-order pre-emphasis: y[n] = x[n] - 1.7*x[n-1] + 0.7225*x[n-2]
+      2. Zero-phase spectral transform: z = irfft(|rfft(y)|)
+      3. ESR: sum((z_target - z_pred)^2) / (sum(z_target^2) + eps)
     """
     def __init__(self, use_preemphasis: bool = True, eps: float = 1e-20):
         super().__init__()

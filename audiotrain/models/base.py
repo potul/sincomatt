@@ -19,7 +19,7 @@ class BaseAmpModel(nn.Module, abc.ABC):
     @property
     def receptive_field_pad(self) -> int:
         """
-        Total causal lookback samples required by valid Conv1d layers (matching *(model + 0x218) in AudioTrainHHAG.exe):
+        Total causal lookback samples required by valid Conv1d layers:
           - AM4: 1022 (511 + 511)
           - AM3: 573 (63 + 255 + 255)
           - IR1024: 1023

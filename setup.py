@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="audiotrain",
     version="1.0.0",
-    description="Modern Python AI Neural Amp Trainer replicating AudioTrainHHAG.exe and SincoANN",
+    description="Modular PyTorch AI Neural Amplifier Trainer for AM3, AM4, IR, and NAM Distillation",
     packages=find_packages(),
     include_package_data=True,
     package_data={

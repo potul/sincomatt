@@ -75,7 +75,7 @@ class AM3Model(BaseAmpModel):
 
     def forward(self, x: torch.Tensor, target_len: int = 512) -> torch.Tensor:
         """
-        Matches FUN_14003dec0 in AudioTrainHHAG.exe:
+        Causal forward pass:
         When x has shape (B, 1, target_len + 573) [e.g. 512 + 573 = 1085],
         cnn, fir1, and fir2 execute pure valid convolution (padding=0) over real historical audio:
           1085 -> cnn -> 1022 -> fir1 -> 767 -> asinh -> GRU -> Linear -> 767 -> fir2 -> 512.
@@ -86,7 +86,7 @@ class AM3Model(BaseAmpModel):
 
         # Multi-channel valid CNN filter bank: (B, 1, T) -> (B, 3, T - 63)
         c = self.cnn(x)
-        # Hardware AM3 quadratic Volterra / gated product (FUN_14003dec0 at 0x14003e43b-0x14003e464):
+        # Hardware AM3 quadratic Volterra / gated product:
         # x_cnn = c0 * c1 + c2
         x_cnn = c[:, 0:1, :] * c[:, 1:2, :] + c[:, 2:3, :]
 
@@ -116,7 +116,7 @@ class AM3Model(BaseAmpModel):
 
     def export_weights_array(self) -> torch.Tensor:
         """
-        Exact binary layout verified against AudioTrainHHAG.exe and kpa-blue.am3Data:
+        Binary weight serialization layout for .am3Data:
           1. fir1 (256)
           2. rnn.weight_ih_l0 (48)
           3. rnn.weight_hh_l0 (768)
@@ -137,7 +137,7 @@ class AM3Model(BaseAmpModel):
             return torch.cat(tensors, dim=0).to(torch.float32)
 
     def load_weights_array(self, weights: torch.Tensor) -> None:
-        """Loads weights from contiguous 1D float32 array matching AudioTrainHHAG.exe."""
+        """Loads weights from contiguous 1D float32 array."""
         w = weights.view(-1).cpu()
         idx = 0
 

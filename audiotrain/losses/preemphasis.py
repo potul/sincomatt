@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 class PreEmphasisFilter(nn.Module):
     """
-    Perceptual pre-emphasis filter matching FUN_14003f1a0 in AudioTrainHHAG.exe (BasicTuning):
+    First-stage perceptual pre-emphasis filter (BasicTuning):
     y[n] = x[n] - 0.7225 * x[n-2]
     Implemented via tensor slicing along the time dimension:
       x[..., 2:] - 0.7225 * x[..., :-2]
@@ -26,7 +26,7 @@ class PreEmphasisFilter(nn.Module):
 
 class SpectralPreEmphasisFilter(nn.Module):
     """
-    Second-order perceptual pre-emphasis filter matching FUN_14003eb70 in AudioTrainHHAG.exe (FineTuning):
+    Second-order perceptual pre-emphasis filter (FineTuning):
     H(z) = (1 - 0.85 * z^-1)^2 = 1 - 1.7 * z^-1 + 0.7225 * z^-2
     y[n] = x[n] - 1.7 * x[n-1] + 0.7225 * x[n-2]
     Implemented via tensor slicing along the time dimension:

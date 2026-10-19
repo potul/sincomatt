@@ -63,7 +63,7 @@ class AM4Model(BaseAmpModel):
 
     def forward(self, x: torch.Tensor, target_len: int = 512) -> torch.Tensor:
         """
-        Matches FUN_14003dec0 in AudioTrainHHAG.exe:
+        Causal forward pass:
         When x has shape (B, 1, target_len + receptive_field_pad) [e.g. 512 + 1022 = 1534],
         fir1 and fir2 execute pure valid convolution (padding=0) over real historical audio:
           1534 -> fir1 -> 1023 -> GRU -> Linear -> 1023 -> fir2 -> 512.

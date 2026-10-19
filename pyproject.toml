@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "audiotrain"
 version = "1.0.0"
-description = "Modern Python AI Neural Amp Trainer replicating AudioTrainHHAG.exe and SincoANN"
+description = "Modular PyTorch AI Neural Amplifier Trainer for AM3, AM4, IR, and NAM Distillation"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [

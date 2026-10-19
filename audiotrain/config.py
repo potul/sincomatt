@@ -9,7 +9,7 @@ import yaml
 
 
 class ModelType(IntEnum):
-    """Matches the integer model selector in AudioTrainHHAG.exe."""
+    """Supported amplifier and impulse response model types."""
     AM3 = 0
     AM4 = 1
     IR1024 = 2
@@ -110,7 +110,7 @@ class AppConfig:
     @classmethod
     def from_legacy_string(cls, legacy_cmd: str) -> AppConfig:
         """
-        Parses legacy AudioTrainHHAG.exe argument format:
+        Parses legacy '?' delimited argument format:
         "<SamplesPath>?<BatchSize>?<Times>?<Delay>?<LRate>?<Model>"
         """
         parts = legacy_cmd.split("?")
@@ -138,7 +138,7 @@ class AppConfig:
 
         # Adjust default FIR lengths based on model type
         config.apply_model_defaults()
-        config.render_audio = True  # Legacy AudioTrainHHAG.exe always emitted preview audio
+        config.render_audio = True  # Legacy CLI mode emits preview audio by default
         return config
 
     def apply_model_defaults(self) -> None:

@@ -10,7 +10,7 @@ from audiotrain.data.audio import LoadedAudio
 
 class AudioFrameDataset(Dataset):
     """
-    Framed dataset matching FUN_14003ad60 & FUN_14003bfd0 in AudioTrainHHAG.exe.
+    Framed audio dataset for causal time-series training.
     Slices continuous audio into target frames of size 512 samples, while providing
     the preceding `receptive_field_pad` samples of real continuous dry audio so that
     valid Conv1d layers (and GRU state warmup) operate on real historical context:
@@ -76,7 +76,7 @@ def create_train_val_datasets(
     train_ratio: float = 0.6,
 ) -> Tuple[AudioFrameDataset, AudioFrameDataset]:
     """
-    Splits frames according to the reverse-engineered 60% train / 40% validation ratio.
+    Splits frames according to the 60% train / 40% validation ratio.
     """
     total_available = loaded_audio.total_samples - delay
     total_frames = max(0, total_available // frame_size)
@@ -123,7 +123,7 @@ def get_dataloaders(
         drop_last=False,
     )
 
-    # AudioTrainHHAG.exe processes full batches for validation loss averaging,
+    # Process full batches for validation loss averaging,
     # dropping trailing fractional frames (fading silence) that distort unweighted batch averages.
     val_drop_last = len(val_dataset) >= batch_size
     val_loader = DataLoader(

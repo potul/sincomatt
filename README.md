@@ -1,6 +1,6 @@
-# AudioTrain: Neural Amp Modeler & Trainer (SincoANN Compatible)
+# AudioTrain: Neural Amp Modeler & Trainer (AM3 / AM4 / IR Compatible)
 
-AudioTrain is a modern, modular PyTorch replication of `AudioTrainHHAG.exe`, the AI neural amplifier training tool from SincoANN. It reverse-engineers and preserves the exact neural architectures, perceptual loss formulations, and binary serialization format (`.am3Data`, `.am4Data`, `.irData`) used by Sinco guitar amp hardware and VST plugins.
+AudioTrain is a modern, modular PyTorch neural amplifier training suite. It implements causal FIR-GRU-FIR neural architectures, perceptual loss formulations, and hardware-compatible binary serialization (`.am3Data`, `.am4Data`, `.irData`) for guitar amp hardware and VST plugins.
 
 ---
 
@@ -20,7 +20,7 @@ AudioTrain is a modern, modular PyTorch replication of `AudioTrainHHAG.exe`, the
   - Exports rendered stereo `<model>_am4.wav` audio with peak loudness restored.
 - **Dual Invocation Modes**:
   - Clean modern CLI with flag arguments (`--samples`, `--batch-size`, `--epochs`, `--model`, etc.).
-  - Legacy backward-compatibility mode parsing the original `?`-delimited string:
+  - Legacy backward-compatibility mode parsing the `?`-delimited string:
     `"<SamplesPath>?<BatchSize>?<Times>?<Delay>?<LRate>?<Model>"`
 
 ---
@@ -164,9 +164,9 @@ python train.py --batch-file batch_queue.txt --model AM4
 - **Fault Tolerance**: If one audio capture is corrupted, the runner logs the error, records `FAILED` in the ledger, and proceeds to the remaining files.
 - **Summary Report**: Writes `batch_summary.json` containing timing, loss, and output paths, and prints an ASCII summary table.
 
-### 4. Legacy Invocation Format (AudioTrainHHAG.exe Drop-In)
+### 4. Legacy String Invocation Format
 
-If your automated pipeline or script invokes the executable with a single `?`-delimited string, you can pass it directly:
+If your automated pipeline or script passes a single `?`-delimited string argument, you can pass it directly:
 
 ```powershell
 python train.py "samples\amp_sample.wav?1024?1000?0?0.0008?1"

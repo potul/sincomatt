@@ -9,7 +9,7 @@ class ESRLoss(nn.Module):
     """
     Pre-emphasized Error-to-Signal Ratio (ESR) Loss:
     Loss = sum((y_filt - pred_filt)^2) / (sum(y_filt^2) + eps)
-    with eps = 1e-20 (exact constant extracted from decompilation).
+    with numerical stability constant eps = 1e-20.
     """
     def __init__(self, use_preemphasis: bool = True, eps: float = 1e-20):
         super().__init__()

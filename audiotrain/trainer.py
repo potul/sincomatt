@@ -41,7 +41,7 @@ logger = logging.getLogger("AudioTrain")
 
 class AudioTrainer:
     """
-    Main training engine replicating AudioTrainHHAG.exe execution loop:
+    Main neural amplifier training engine:
       - Sinc resampling & peak normalization
       - 60% Train / 40% Validation partition
       - Dual-phase curriculum: BasicTuning (ESR) -> FineTuning (Spectral)
@@ -88,7 +88,7 @@ class AudioTrainer:
         desired = self.config.training.device.lower()
         if "cuda" in desired and torch.cuda.is_available():
             self.device = torch.device("cuda")
-            # Match AudioTrainHHAG.exe (FUN_140044950) cuDNN configuration
+            # Configure cuDNN for deterministic high-throughput execution
             torch.backends.cudnn.enabled = True
             torch.backends.cudnn.benchmark = True
             torch.backends.cudnn.deterministic = True
@@ -313,10 +313,10 @@ class AudioTrainer:
     @torch.no_grad()
     def validate(self) -> Tuple[float, float, float]:
         """
-        Computes validation metrics matching AudioTrainHHAG.exe (FUN_140044EE0 - FUN_140045082):
+        Computes validation metrics across the validation dataset:
         Evaluates each batch through the active loss function:
-          - BasicTuning: FUN_14003f820 (1st-order 2-tap pre-emphasis + time ESR)
-          - FineTuning:  FUN_14003f9f0 (2nd-order 3-tap pre-emphasis + rfft/abs/irfft ESR)
+          - BasicTuning: 1st-order 2-tap pre-emphasis + time-domain ESR
+          - FineTuning:  2nd-order 3-tap pre-emphasis + rfft/abs/irfft ESR
         and computes the arithmetic mean across batches:
           Val Loss = (1 / N) * sum(batch_loss)
         with eps = 1e-20.
@@ -346,15 +346,15 @@ class AudioTrainer:
 
             y_dev = y.to(self.device, non_blocking=True)
 
-            # 1. Time-domain ESR for this batch (FUN_14003f820)
+            # 1. Time-domain ESR for this batch
             b_esr = self.val_esr(pred, y_dev).item()
             batch_esr.append(b_esr)
 
-            # 2. Spectral / cepstral ESR for this batch (FUN_14003f9f0)
+            # 2. Spectral / cepstral ESR for this batch
             b_spec = self.val_spectral(pred, y_dev).item()
             batch_spectral.append(b_spec)
 
-            # Active loss for this batch (FUN_140042f00)
+            # Active loss for this batch
             b_loss = b_spec if self.criterion.is_fine_tuning else b_esr
             batch_losses.append(b_loss)
 
@@ -369,7 +369,7 @@ class AudioTrainer:
     def render_full_prediction(self) -> np.ndarray:
         """
         Renders the entire dry audio signal through the trained model with continuous
-        receptive-field overlap between chunks (matching FUN_140046280 / FUN_14003d4a0).
+        receptive-field overlap between chunks.
         """
         self.model.eval()
         dry_tensor = torch.from_numpy(self.audio_data.dry).unsqueeze(0).unsqueeze(0).to(self.device)
@@ -395,7 +395,7 @@ class AudioTrainer:
 
     def save_artifacts(self, val_loss: float, epoch: int) -> None:
         """
-        Saves all training artifacts matching AudioTrainHHAG.exe:
+        Saves all training artifacts:
           1. <model_name>.am3Data or .am4Data (hardware binary format)
           2. <model_name>.am4lossrec (float loss tracking text file)
           3. <model_name>_am4.wav (rendered stereo audio with restored target loudness)
@@ -479,13 +479,12 @@ class AudioTrainer:
         start_time = time.time()
         for epoch in range(1, epochs + 1):
             if epoch == self.criterion.fine_tuning_epoch:
-                # Matches 0x1400450BF in AudioTrainHHAG.exe:
                 # Reset best loss tracker when transitioning to FineTuning spectral loss scale
                 self.best_val_loss = float("inf")
                 patience_counter = 0
                 logger.info(
                     f"-> Transitioning to FineTuning Stage [Spectral]. "
-                    f"Resetting best loss tracker (matching AudioTrainHHAG.exe)..."
+                    f"Resetting best loss tracker..."
                 )
             elif not self.config.training.show_batch_progress and epoch == 1:
                 stage_hint = "FineTuning [Spectral]" if self.criterion.is_fine_tuning else "BasicTuning [ESR]"

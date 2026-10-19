@@ -1,5 +1,5 @@
 """
-AudioTrain: Modern Python replication of SincoANN / AudioTrainHHAG.exe AI neural amp training pipeline.
+AudioTrain: Modular PyTorch neural amplifier modeling and training pipeline.
 Supports AM3, AM4, IR1024, IR2048 architectures and NAM model import/distillation.
 """
 
