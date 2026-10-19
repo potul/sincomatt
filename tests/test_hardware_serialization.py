@@ -270,11 +270,51 @@ class TestHardwareBinarySerialization(unittest.TestCase):
                     out_files = list(Path(cfg.output_dir).glob("*Data"))
                     self.assertEqual(len(out_files), 1)
                     self.assertEqual(out_files[0].stat().st_size, exp_bytes)
+    def test_nam_vs_legacy_reamp_detection_and_segmentation(self):
+        import soundfile as sf
+        from audiotrain.data.audio import LoadedAudio, resample_signal
+        from audiotrain.data.dataset import create_train_val_datasets, detect_reamp_profile
+
+        # 1. Verify bundled default_dry.wav (NAM v3_0_0.wav) is detected at both 48 kHz and 44.1 kHz
+        nam_asset = Path("audiotrain/assets/default_dry.wav")
+        self.assertTrue(nam_asset.is_file())
+        dry_48k, sr_48k = sf.read(str(nam_asset), dtype="float32")
+        self.assertEqual(detect_reamp_profile(dry_48k, sr_48k), "NAM_V3")
+
+        dry_44k = resample_signal(dry_48k, sr_48k, 44100)
+        self.assertEqual(detect_reamp_profile(dry_44k, 44100), "NAM_V3")
+
+        loaded_nam = LoadedAudio(
+            dry=dry_44k,
+            target=dry_44k,
+            sample_rate=44100,
+            dry_loudness=1.0,
+            target_loudness=1.0,
+            total_samples=len(dry_44k),
+        )
+        train_ds, val_ds = create_train_val_datasets(loaded_nam, frame_size=512)
+        self.assertEqual(getattr(train_ds, "reamp_profile", None), "NAM_V3")
+        self.assertEqual(train_ds.start_frame, (10 * 44100) // 512)
+        self.assertEqual(len(train_ds), (181 * 44100) // 512 - (10 * 44100) // 512)
+        self.assertEqual(len(val_ds), (190 * 44100) // 512 - (181 * 44100) // 512)
+
+        # 2. Verify legacy ~59s reamp falls back to LEGACY_60_40 (60% train / 40% val)
+        legacy_dry = np.sin(np.linspace(0, 1000, 2599989, dtype=np.float32))
+        self.assertEqual(detect_reamp_profile(legacy_dry, 44100), "LEGACY_60_40")
+        loaded_leg = LoadedAudio(
+            dry=legacy_dry,
+            target=legacy_dry,
+            sample_rate=44100,
+            dry_loudness=1.0,
+            target_loudness=1.0,
+            total_samples=len(legacy_dry),
+        )
+        tr_leg, va_leg = create_train_val_datasets(loaded_leg, frame_size=512)
+        self.assertEqual(getattr(tr_leg, "reamp_profile", None), "LEGACY_60_40")
+        total_f = len(legacy_dry) // 512
+        self.assertEqual(len(tr_leg), int(total_f * 0.6))
+        self.assertEqual(len(va_leg), total_f - int(total_f * 0.6))
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
-

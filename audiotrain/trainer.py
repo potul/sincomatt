@@ -155,16 +155,10 @@ class AudioTrainer:
             p.requires_grad = False
 
     def _find_default_dry_audio(self) -> Path:
-        """Finds a valid dry guitar audio track for NAM distillation excitation."""
-        candidates = [
-            Path(__file__).parent / "assets" / "default_dry.wav",
-            Path("SincoAnn/ori-hhag.wav"),
-            Path("SincoAnn/ori.wav"),
-            Path("SincoAnn/TEST7.wav"),
-        ]
-        for c in candidates:
-            if c.is_file():
-                return c
+        """Finds the bundled NAM v3_0_0.wav dry guitar excitation track for NAM distillation."""
+        default_asset = Path(__file__).parent / "assets" / "default_dry.wav"
+        if default_asset.is_file():
+            return default_asset
         raise FileNotFoundError(
             "No dry guitar audio found for NAM distillation. Please specify --dry-wav <path_to_dry.wav>"
         )
@@ -188,38 +182,61 @@ class AudioTrainer:
             logger.info(f"NAM Distillation: Using dry guitar excitation from {dry_file}")
             raw_audio, sr = sf.read(str(dry_file), dtype="float32")
             dry = raw_audio[:, 0] if raw_audio.ndim > 1 else raw_audio
-            if sr != self.config.data.sample_rate:
-                dry = resample_signal(dry, sr, self.config.data.sample_rate)
 
-            # Peak normalize dry
-            dry_loudness = float(np.max(np.abs(dry))) if len(dry) > 0 else 1.0
-            if self.config.data.normalize_peak and dry_loudness > 1e-8:
-                dry = dry / dry_loudness
+            # Run teacher NAM model at its native sample rate (typically 48 kHz) before resampling to 44.1 kHz
+            teacher_sr = int(round(getattr(self.teacher_model, "sample_rate", sr) or sr))
+            if sr != teacher_sr:
+                dry_teacher = resample_signal(dry, sr, teacher_sr)
+            else:
+                dry_teacher = dry
 
-            # Render target audio through teacher NAM model in chunks
-            logger.info("NAM Distillation: Generating ground-truth target audio via teacher NAM model...")
-            dry_t = torch.from_numpy(dry).unsqueeze(0).unsqueeze(0).to(self.device)
+            # Render target audio through teacher NAM model in chunks with causal overlap
+            logger.info(
+                f"NAM Distillation: Generating ground-truth target audio via teacher NAM model at {teacher_sr} Hz..."
+            )
+            dry_t = torch.from_numpy(dry_teacher).unsqueeze(0).unsqueeze(0).to(self.device)
             target_chunks = []
             chunk_len = 32768
+            overlap = 8192
+            total_t = dry_t.shape[-1]
             with torch.no_grad():
-                for start in range(0, dry_t.shape[-1], chunk_len):
-                    end = min(start + chunk_len, dry_t.shape[-1])
-                    chunk = dry_t[:, :, start:end]
+                for start in range(0, total_t, chunk_len):
+                    end = min(start + chunk_len, total_t)
+                    in_start = max(0, start - overlap)
+                    chunk = dry_t[:, :, in_start:end]
                     chunk_out = self.teacher_model(chunk)
-                    target_chunks.append(chunk_out.squeeze().cpu().numpy())
+                    valid_len = end - start
+                    target_chunks.append(chunk_out[:, :, -valid_len:].squeeze(0).squeeze(0).cpu().numpy())
 
             target = np.concatenate(target_chunks)
+            dry_final = dry_teacher
+
+            # Resample both dry and target to the hardware target sample rate (44.1 kHz)
+            target_sr = self.config.data.sample_rate
+            if teacher_sr != target_sr:
+                dry_final = resample_signal(dry_final, teacher_sr, target_sr)
+                target = resample_signal(target, teacher_sr, target_sr)
+
+            min_len = min(len(dry_final), len(target))
+            dry_final = dry_final[:min_len]
+            target = target[:min_len]
+
+            # Peak normalize dry and target
+            dry_loudness = float(np.max(np.abs(dry_final))) if len(dry_final) > 0 else 1.0
+            if self.config.data.normalize_peak and dry_loudness > 1e-8:
+                dry_final = dry_final / dry_loudness
+
             target_loudness = float(np.max(np.abs(target))) if len(target) > 0 else 1.0
             if self.config.data.normalize_peak and target_loudness > 1e-8:
                 target = target / target_loudness
 
             self.audio_data = LoadedAudio(
-                dry=dry,
-                target=target,
-                sample_rate=self.config.data.sample_rate,
+                dry=dry_final.astype(np.float32),
+                target=target.astype(np.float32),
+                sample_rate=target_sr,
                 dry_loudness=dry_loudness,
                 target_loudness=target_loudness,
-                total_samples=len(dry),
+                total_samples=min_len,
             )
         else:
             logger.info(f"Loading and preprocessing audio from {self.config.samples_path}")
@@ -237,9 +254,13 @@ class AudioTrainer:
             train_ratio=self.config.data.train_ratio,
         )
 
+        profile = getattr(train_ds, "reamp_profile", "LEGACY_60_40")
+        active_frames = max(1, len(train_ds) + len(val_ds))
+        train_pct = 100.0 * len(train_ds) / active_frames
+        val_pct = 100.0 * len(val_ds) / active_frames
         logger.info(
-            f"Dataset split: {len(train_ds):,} train frames (60%), "
-            f"{len(val_ds):,} val frames (40%) [Total: {len(train_ds) + len(val_ds):,}, "
+            f"Dataset split [{profile}]: {len(train_ds):,} train frames ({train_pct:.1f}%), "
+            f"{len(val_ds):,} val frames ({val_pct:.1f}%) [Active: {len(train_ds) + len(val_ds):,}, "
             f"lookback={self.model.receptive_field_pad} samples]"
         )
 
