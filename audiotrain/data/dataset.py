@@ -171,29 +171,30 @@ def create_train_val_datasets(
     profile = detect_reamp_profile(loaded_audio.dry, sr)
 
     if profile == "NAM_V3":
-        # Skip [0..10s] (Validation 1 + 1s silence); Train on [10s..181s]; Validate on [181s..190s] (9s)
-        train_start_frame = int(round(10.0 * sr)) // frame_size
+        # Skip [0..60s] (Validation 1, blips, white-noise bursts, and synthetic sweeps/chirps);
+        # Train on [60s..181s] (121s pure guitar DI); Validate on [181s..190s] (9s guitar DI)
+        train_start_frame = int(round(60.0 * sr)) // frame_size
         val_start_frame = int(round(181.0 * sr)) // frame_size
         val_end_frame = min(total_frames, int(round(190.0 * sr)) // frame_size)
         train_frames = max(0, val_start_frame - train_start_frame)
         val_frames = max(0, val_end_frame - val_start_frame)
     elif profile == "NAM_V2":
-        # Train on [0..171s]; Validate on [171s..180s] (9s guitar validation clip)
-        train_start_frame = 0
+        # Skip [0..7s] (blips, chirp, white noise); Train on [7s..171s]; Validate on [171s..180s] (9s)
+        train_start_frame = int(round(7.0 * sr)) // frame_size
         val_start_frame = int(round(171.0 * sr)) // frame_size
         val_end_frame = min(total_frames, int(round(180.0 * sr)) // frame_size)
         train_frames = max(0, val_start_frame - train_start_frame)
         val_frames = max(0, val_end_frame - val_start_frame)
     elif profile == "NAM_V1":
-        # Train on [0..171s]; Validate on [171s..180s] (9s guitar validation clip)
-        train_start_frame = 0
+        # Skip [0..7s] (blips, sweep, white noise); Train on [7s..171s]; Validate on [171s..180s] (9s)
+        train_start_frame = int(round(7.0 * sr)) // frame_size
         val_start_frame = int(round(171.0 * sr)) // frame_size
         val_end_frame = min(total_frames, int(round(180.0 * sr)) // frame_size)
         train_frames = max(0, val_start_frame - train_start_frame)
         val_frames = max(0, val_end_frame - val_start_frame)
     elif profile == "NAM_PROTEUS":
-        # Skip first 1s blips; Validate on final 10s
-        train_start_frame = int(round(1.0 * sr)) // frame_size
+        # Skip [0..17s] (blips, sweeps, white noise); Validate on final 10s
+        train_start_frame = int(round(17.0 * sr)) // frame_size
         val_frames = min(total_frames, int(round(10.0 * sr)) // frame_size)
         val_start_frame = max(train_start_frame, total_frames - val_frames)
         train_frames = max(0, val_start_frame - train_start_frame)

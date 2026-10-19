@@ -294,9 +294,20 @@ class TestHardwareBinarySerialization(unittest.TestCase):
         )
         train_ds, val_ds = create_train_val_datasets(loaded_nam, frame_size=512)
         self.assertEqual(getattr(train_ds, "reamp_profile", None), "NAM_V3")
-        self.assertEqual(train_ds.start_frame, (10 * 44100) // 512)
-        self.assertEqual(len(train_ds), (181 * 44100) // 512 - (10 * 44100) // 512)
+        self.assertEqual(train_ds.start_frame, (60 * 44100) // 512)
+        self.assertEqual(len(train_ds), (181 * 44100) // 512 - (60 * 44100) // 512)
         self.assertEqual(len(val_ds), (190 * 44100) // 512 - (181 * 44100) // 512)
+
+        # Verify NAM A1 model (Fender.nam) consumes 100% of weights and produces valid AC waveform
+        fender_nam = Path("Fender/Fender.nam")
+        if fender_nam.is_file():
+            from audiotrain.models.nam import NAMModel
+            nam_a1 = NAMModel.from_file(fender_nam).eval()
+            with torch.no_grad():
+                x_test = torch.from_numpy(dry_48k[60 * sr_48k : 61 * sr_48k]).unsqueeze(0).unsqueeze(0)
+                y_test = nam_a1(x_test).squeeze()
+                self.assertTrue(torch.all(torch.isfinite(y_test)))
+                self.assertGreater(float(torch.std(y_test)), 0.01)
 
         # 2. Verify legacy ~59s reamp falls back to LEGACY_60_40 (60% train / 40% val)
         legacy_dry = np.sin(np.linspace(0, 1000, 2599989, dtype=np.float32))

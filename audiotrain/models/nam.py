@@ -17,47 +17,94 @@ from audiotrain.models.am4 import AM4Model
 logger = logging.getLogger(__name__)
 
 
-class NAMDilatedConvBlock(nn.Module):
-    """Single WaveNet layer block from NAM A1 specification."""
+class NAMA1Layer(nn.Module):
+    """Single dilated residual + skip layer within a NAM A1 WaveNet LayerArray."""
     def __init__(
         self,
-        in_channels: int,
-        out_channels: int,
+        condition_size: int,
+        channels: int,
         kernel_size: int,
         dilation: int,
+        activation: str = "Tanh",
         gated: bool = False,
     ):
         super().__init__()
-        self.gated = gated
-        out_mult = 2 if gated else 1
-        self.conv = nn.Conv1d(
-            in_channels,
-            out_channels * out_mult,
-            kernel_size=kernel_size,
-            dilation=dilation,
-            bias=True,
-        )
-        self.dilation = dilation
+        self.channels = channels
         self.kernel_size = kernel_size
+        self.dilation = dilation
+        self.gated = gated
+        self.activation_name = activation
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        mid_channels = 2 * channels if gated else channels
+        self.conv = nn.Conv1d(channels, mid_channels, kernel_size=kernel_size, dilation=dilation, bias=True)
+        self.input_mixer = nn.Conv1d(condition_size, mid_channels, kernel_size=1, bias=False)
+        self.layer1x1 = nn.Conv1d(channels, channels, kernel_size=1, bias=True)
+
+    def _activate(self, z: torch.Tensor) -> torch.Tensor:
+        name = str(self.activation_name).lower()
+        if "leaky" in name:
+            return F.leaky_relu(z, negative_slope=0.01)
+        if "relu" in name:
+            return F.relu(z)
+        if "softsign" in name:
+            return F.softsign(z)
+        return torch.tanh(z)
+
+    def forward(self, x: torch.Tensor, c: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         pad_len = (self.kernel_size - 1) * self.dilation
         x_pad = F.pad(x, (pad_len, 0))
-        h = self.conv(x_pad)
+        z1 = self.conv(x_pad) + self.input_mixer(c)
         if self.gated:
-            a, b = torch.chunk(h, 2, dim=1)
-            return torch.tanh(a) * torch.sigmoid(b)
-        return torch.tanh(h)
+            a, b = torch.chunk(z1, 2, dim=1)
+            post_act = self._activate(a) * torch.sigmoid(b)
+        else:
+            post_act = self._activate(z1)
+        residual = x + self.layer1x1(post_act)
+        return residual, post_act
 
 
-class NAMWaveNetHead(nn.Module):
-    """Standard 1x1 projection head for A1 WaveNet."""
-    def __init__(self, in_channels: int, out_channels: int = 1, bias: bool = True):
+class NAMA1LayerArray(nn.Module):
+    """Single LayerArray block in NAM A1 WaveNet (rechannel -> dilated layers -> head_rechannel)."""
+    def __init__(self, layer_cfg: Dict[str, Any]):
         super().__init__()
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=bias)
+        in_size = int(layer_cfg.get("input_size", 1))
+        cond_size = int(layer_cfg.get("condition_size", 1))
+        channels = int(layer_cfg.get("channels", 16))
+        head_size = int(layer_cfg.get("head_size", 1))
+        kernel_size = int(layer_cfg.get("kernel_size", 3))
+        dilations = layer_cfg.get("dilations", [1])
+        activation = str(layer_cfg.get("activation", "Tanh"))
+        gated = bool(layer_cfg.get("gated", False))
+        head_bias = bool(layer_cfg.get("head_bias", False))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.conv(x)
+        self.rechannel = nn.Conv1d(in_size, channels, kernel_size=1, bias=False)
+        self.layers = nn.ModuleList(
+            [
+                NAMA1Layer(
+                    condition_size=cond_size,
+                    channels=channels,
+                    kernel_size=kernel_size,
+                    dilation=int(d),
+                    activation=activation,
+                    gated=gated,
+                )
+                for d in dilations
+            ]
+        )
+        self.head_rechannel = nn.Conv1d(channels, head_size, kernel_size=1, bias=head_bias)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        c: torch.Tensor,
+        head_input: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        x = self.rechannel(x)
+        for layer in self.layers:
+            x, head_term = layer(x, c)
+            head_input = head_term if head_input is None else head_input + head_term
+        head_out = self.head_rechannel(head_input)
+        return head_out, x
 
 
 class NAMA1Model(nn.Module):
@@ -70,60 +117,74 @@ class NAMA1Model(nn.Module):
         self.architecture = config.get("architecture", "WaveNet")
         self.architecture_variant = "A1-WaveNet"
         self.layers_config = config.get("config", {}).get("layers", [])
-        self.head_scale = config.get("config", {}).get("head_scale", 1.0)
-        self.sample_rate = float(config.get("sample_rate", 44100.0) or 44100.0)
+        self.head_scale = float(config.get("config", {}).get("head_scale", 1.0))
+        self.sample_rate = float(config.get("sample_rate", 48000.0) or 48000.0)
         self.metadata = config.get("metadata", {})
 
-        self.blocks = nn.ModuleList()
-        self.heads = nn.ModuleList()
-
-        for layer_cfg in self.layers_config:
-            in_ch = layer_cfg.get("input_size", 1)
-            ch = layer_cfg.get("channels", 16)
-            k = layer_cfg.get("kernel_size", 3)
-            dilations = layer_cfg.get("dilations", [1])
-            gated = layer_cfg.get("gated", False)
-            head_bias = layer_cfg.get("head_bias", True)
-
-            layer_blocks = nn.ModuleList()
-            for d in dilations:
-                block = NAMDilatedConvBlock(in_ch, ch, kernel_size=k, dilation=d, gated=gated)
-                layer_blocks.append(block)
-                in_ch = ch
-            self.blocks.append(layer_blocks)
-
-            head = NAMWaveNetHead(ch, 1, bias=head_bias)
-            self.heads.append(head)
+        self.layer_arrays = nn.ModuleList(
+            [NAMA1LayerArray(layer_cfg) for layer_cfg in self.layers_config]
+        )
 
         self._load_flat_weights(weights)
 
     def _load_flat_weights(self, weights: List[float]) -> None:
-        """Loads weights from contiguous list in NAM A1 JSON format."""
-        weight_tensor = torch.tensor(weights, dtype=torch.float32)
-        offset = 0
-        for p in self.parameters():
-            num = p.numel()
-            if offset + num <= len(weight_tensor):
-                chunk = weight_tensor[offset : offset + num].view_as(p)
-                p.data.copy_(chunk)
-                offset += num
+        """Loads weights from contiguous list matching NAM A1 WaveNet memory layout."""
+        w = torch.tensor(weights, dtype=torch.float32)
+        idx = 0
+
+        def take(n: int) -> torch.Tensor:
+            nonlocal idx
+            res = w[idx : idx + n]
+            idx += n
+            return res
+
+        for la in self.layer_arrays:
+            # 1. rechannel (no bias)
+            la.rechannel.weight.data.copy_(take(la.rechannel.weight.numel()).view_as(la.rechannel.weight))
+            # 2. layers (conv weight+bias, input_mixer weight, layer1x1 weight+bias)
+            for layer in la.layers:
+                layer.conv.weight.data.copy_(take(layer.conv.weight.numel()).view_as(layer.conv.weight))
+                layer.conv.bias.data.copy_(take(layer.conv.bias.numel()).view_as(layer.conv.bias))
+                layer.input_mixer.weight.data.copy_(
+                    take(layer.input_mixer.weight.numel()).view_as(layer.input_mixer.weight)
+                )
+                layer.layer1x1.weight.data.copy_(
+                    take(layer.layer1x1.weight.numel()).view_as(layer.layer1x1.weight)
+                )
+                layer.layer1x1.bias.data.copy_(
+                    take(layer.layer1x1.bias.numel()).view_as(layer.layer1x1.bias)
+                )
+            # 3. head_rechannel (weight + optional bias)
+            la.head_rechannel.weight.data.copy_(
+                take(la.head_rechannel.weight.numel()).view_as(la.head_rechannel.weight)
+            )
+            if la.head_rechannel.bias is not None:
+                la.head_rechannel.bias.data.copy_(
+                    take(la.head_rechannel.bias.numel()).view_as(la.head_rechannel.bias)
+                )
+
+        # Trailing float is head_scale
+        if idx < len(w):
+            tail_scale = float(take(1).detach()[0])
+            if abs(tail_scale - self.head_scale) > 1e-5:
+                self.head_scale = tail_scale
+
+        if idx != len(w):
+            logger.warning(f"A1 Model: consumed {idx} of {len(w)} weights ({len(w) - idx} trailing).")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: (B, 1, T)
         returns: (B, 1, T)
         """
-        out = torch.zeros_like(x)
-        current_x = x
+        c = x
+        y = x
+        head_input: Optional[torch.Tensor] = None
 
-        for layer_blocks, head in zip(self.blocks, self.heads):
-            h = current_x
-            for block in layer_blocks:
-                h = block(h)
-            out = out + head(h)
-            current_x = h
+        for layer_array in self.layer_arrays:
+            head_input, y = layer_array(y, c, head_input=head_input)
 
-        return out * self.head_scale
+        return head_input * self.head_scale
 
 
 class NAMA2Model(nn.Module):

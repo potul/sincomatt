@@ -318,11 +318,19 @@ class AudioTrainer:
 
                 del y_trans, denom
 
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            self.optimizer.step()
-
-            total_loss += batch_loss_val
-            num_batches += 1
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=1.0, error_if_nonfinite=False
+            )
+            if torch.isfinite(grad_norm) and math.isfinite(batch_loss_val):
+                self.optimizer.step()
+                total_loss += batch_loss_val
+                num_batches += 1
+            else:
+                self.optimizer.zero_grad(set_to_none=True)
+                logger.warning(
+                    f"Epoch {epoch} Batch {b_idx}: non-finite gradient/loss detected "
+                    f"(loss={batch_loss_val}, grad_norm={grad_norm}). Skipping step."
+                )
 
             if self.config.training.show_batch_progress and total_batches > 1:
                 if b_idx % max(1, total_batches // 4) == 0 or b_idx == total_batches:

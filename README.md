@@ -224,12 +224,12 @@ Upon completion (or when validation loss improves), the following files are save
 
 When training on a stereo WAV file (`Channel 0 = Dry Input`, `Channel 1 = Wet Amp Output`) or distilling a `.nam` profile, [`detect_reamp_profile`](audiotrain/data/dataset.py) automatically inspects Channel 0 using sample-rate-, bit-depth-, and gain-invariant acoustic signatures to select the matching train/validation segmentation strategy:
 
-| Detected Profile | Source Input WAV | Total Duration | Skipped Intro | Training Split | Validation Split |
+| Detected Profile | Source Input WAV | Total Duration | Skipped Intro (Blips / Sweeps / Noise) | Training Split (Pure Guitar DI) | Validation Split (Guitar DI) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`NAM_V3`** | NAM `v3_0_0.wav` / `input.wav` (48k or 44.1k) | `~190.0s` (`3:10`) | `0:00 – 0:10` (`Val 1` + 1s silence) | **`0:10 – 3:01`** (`171.0s` / 95%) | **`3:01 – 3:10`** (`9.0s` guitar passage / 5%) |
-| **`NAM_V2`** | NAM `v2_0_0.wav` | `~191.0s` (`3:11`) | None | **`0:00 – 2:51`** (`171.0s` / 95%) | **`2:51 – 3:00`** (`9.0s` guitar passage / 5%) |
-| **`NAM_V1`** | NAM `v1_1_1.wav` / `v1.wav` | `~180.0s` (`3:00`) | None | **`0:00 – 2:51`** (`171.0s` / 95%) | **`2:51 – 3:00`** (`9.0s` guitar passage / 5%) |
-| **`NAM_PROTEUS`** | GuitarML `Proteus_Capture.wav` | `~210.9s` (`3:30.9`) | `0:00 – 0:01` (blips) | **`0:01 – 3:20.9`** (`199.9s` / 95%) | **Final `10.0s`** (`3:20.9 – 3:30.9` / 5%) |
+| **`NAM_V3`** | NAM `v3_0_0.wav` / `input.wav` (48k or 44.1k) | `~190.0s` (`3:10`) | `0:00 – 1:00` (`Val 1`, blips, noise, sweeps) | **`1:00 – 3:01`** (`121.0s` / 93.1%) | **`3:01 – 3:10`** (`9.0s` / 6.9%) |
+| **`NAM_V2`** | NAM `v2_0_0.wav` | `~191.0s` (`3:11`) | `0:00 – 0:07` (blips, chirp, noise) | **`0:07 – 2:51`** (`164.0s` / 94.8%) | **`2:51 – 3:00`** (`9.0s` / 5.2%) |
+| **`NAM_V1`** | NAM `v1_1_1.wav` / `v1.wav` | `~180.0s` (`3:00`) | `0:00 – 0:07` (blips, sweep, noise) | **`0:07 – 2:51`** (`164.0s` / 94.8%) | **`2:51 – 3:00`** (`9.0s` / 5.2%) |
+| **`NAM_PROTEUS`** | GuitarML `Proteus_Capture.wav` | `~210.9s` (`3:30.9`) | `0:00 – 0:17` (blips, sweeps, noise) | **`0:17 – 3:20.9`** (`183.9s` / 94.8%) | **Final `10.0s`** (`3:20.9 – 3:30.9` / 5.2%) |
 | **`LEGACY_60_40`** | Original ANN re-amps (`~59s`, `~173.7s`) or custom WAVs | Any | None | **First `60%`** of frames | **Final `40%`** of frames |
 
 ### Bundled Re-amp & Distillation Audio Files (`audiotrain/assets/`)
